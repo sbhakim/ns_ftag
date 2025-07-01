@@ -1,0 +1,6 @@
+{
+  "python.defaultInterpreterPath": "/home/safayat/anaconda3/envs/ftag/bin/python",
+  "python.terminal.activateEnvironment": true,
+  "python.analysis.extraPaths": ["./src"],
+  "python.envFile": "${workspaceFolder}/.env"
+}

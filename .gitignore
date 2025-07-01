@@ -1,0 +1,17 @@
+# Directories to ignore
+data/
+experiments/
+logs/
+results/
+__pycache__/
+
+# Specific files to ignore
+*.txt
+*.sh
+ns_ftag_code_1.txt
+ns_ftag_code_2.txt
+ns_ftag_code_3.txt
+ns_ftag_code.txt
+extract_ns_ftag.sh
+setup_cursor_env.sh
+os # Assuming 'os' is a leftover file/empty directory you don't want. If it's actual code, remove this line.
