@@ -1,6 +1,5 @@
 # src/tests/test_neural_components.py
 
-
 import unittest
 import torch
 import torch.nn.functional as F
@@ -8,6 +7,10 @@ import sys
 import os
 import pandas as pd
 import numpy as np
+
+# Add src to path
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
 from neural_components.security_attention import SecurityAwareAttention
 from neural_components.gnn_layer import SecurityGNNLayer
 from neural_components.tcn_layer import TemporalConvolutionalNetwork
@@ -18,9 +21,6 @@ from data_processors.relationship_extractor import RelationshipExtractor
 from data_processors.feature_extractor import FeatureExtractor
 from data_processors.label_extractor import LabelExtractor
 from config.neural_config import NeuralConfig
-
-# Add src to path
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 class TestNeuralComponents(unittest.TestCase):
     def setUp(self):
@@ -35,6 +35,7 @@ class TestNeuralComponents(unittest.TestCase):
         self.config.tcn_kernel_size = 3
         self.config.num_attack_types = 6
         self.config.num_mitre_techniques = 6
+        self.num_nodes = 10
 
     def test_security_attention(self):
         """Test security-aware attention mechanism"""
@@ -89,7 +90,7 @@ class TestNeuralComponents(unittest.TestCase):
             ' Destination IP': ['10.0.0.1', '10.0.0.2', '10.0.0.1'],
             ' Destination Port': [80, 80, 443],
             ' Protocol': ['TCP', 'TCP', 'UDP'],
-            ' Timestamp': ['2023-01-01 00:00:00', '2023-01-01 00:00:01', '2023-01-01 00:00:02'],
+            ' Timestamp': ['7/7/2017 15:00:00', '7/7/2017 15:00:01', '7/7/2017 15:00:02'],
             ' Label': ['BENIGN', 'DDoS', 'BENIGN']
         })
         processor = CICIDS2017Processor(self.config)
@@ -101,12 +102,13 @@ class TestNeuralComponents(unittest.TestCase):
     def test_entity_manager(self):
         """Test EntityManager with mock data"""
         mock_data = pd.DataFrame({
-            'flowid': ['1', '2'],
-            'sourceip': ['192.168.1.1', '192.168.1.2'],
-            'sourceport': [12345, 12346],
-            'destinationip': ['10.0.0.1', '10.0.0.2'],
-            'destinationport': [80, 443],
-            'protocol': ['TCP', 'UDP']
+            'Flow ID': ['1', '2'],
+            ' Source IP': ['192.168.1.1', '192.168.1.2'],
+            ' Source Port': [12345, 12346],
+            ' Destination IP': ['10.0.0.1', '10.0.0.2'],
+            ' Destination Port': [80, 443],
+            ' Protocol': ['TCP', 'UDP'],
+            ' Timestamp': ['7/7/2017 15:00:00', '7/7/2017 15:00:01']
         })
         processor = CICIDS2017Processor(self.config)
         df = processor.load_data_from_df(mock_data)
@@ -121,11 +123,11 @@ class TestNeuralComponents(unittest.TestCase):
     def test_relationship_extractor(self):
         """Test RelationshipExtractor with mock data"""
         mock_data = pd.DataFrame({
-            'flowid': ['1', '2', '3'],
-            'sourceip': ['192.168.1.1', '192.168.1.1', '192.168.1.2'],
-            'destinationip': ['10.0.0.1', '10.0.0.1', '10.0.0.2'],
-            'timestamp': ['2023-01-01 00:00:00', '2023-01-01 00:00:01', '2023-01-01 00:00:02'],
-            'label': ['BENIGN', 'DDoS', 'BENIGN']
+            'Flow ID': ['1', '2', '3'],
+            ' Source IP': ['192.168.1.1', '192.168.1.1', '192.168.1.2'],
+            ' Destination IP': ['10.0.0.1', '10.0.0.1', '10.0.0.2'],
+            ' Timestamp': ['7/7/2017 15:00:00', '7/7/2017 15:00:01', '7/7/2017 15:00:02'],
+            ' Label': ['BENIGN', 'DDoS', 'BENIGN']
         })
         processor = CICIDS2017Processor(self.config)
         df = processor.load_data_from_df(mock_data)
@@ -138,18 +140,18 @@ class TestNeuralComponents(unittest.TestCase):
     def test_feature_extractor(self):
         """Test FeatureExtractor with mock data"""
         mock_data = pd.DataFrame({
-            'flowid': ['1', '2'],
-            'sourceip': ['192.168.1.1', '192.168.1.2'],
-            'totalfwdpackets': [10, 20],
-            'totalbackwardpackets': [5, 10],
-            'totallengthoffwdpackets': [1000, 2000],
-            'totallengthofbwdpackets': [500, 1000],
-            'flowduration': [1000000, 2000000],
-            'flowbytess': [1000.0, 1500.0],
-            'flowpacketss': [15.0, 30.0],
-            'fwdpacketlengthmean': [100.0, 100.0],
-            'bwdpacketlengthmean': [100.0, 100.0],
-            'label': ['BENIGN', 'DDoS']
+            'Flow ID': ['1', '2'],
+            ' Source IP': ['192.168.1.1', '192.168.1.2'],
+            ' Total Fwd Packets': [10, 20],
+            ' Total Backward Packets': [5, 10],
+            ' Total Length of Fwd Packets': [1000, 2000],
+            ' Total Length of Bwd Packets': [500, 1000],
+            ' Flow Duration': [1000000, 2000000],
+            ' Flow Bytes/s': [1000.0, 1500.0],
+            ' Flow Packets/s': [15.0, 30.0],
+            ' Fwd Packet Length Mean': [100.0, 100.0],
+            ' Bwd Packet Length Mean': [100.0, 100.0],
+            ' Label': ['BENIGN', 'DDoS']
         })
         processor = CICIDS2017Processor(self.config)
         df = processor.load_data_from_df(mock_data)
@@ -163,9 +165,9 @@ class TestNeuralComponents(unittest.TestCase):
     def test_label_extractor(self):
         """Test LabelExtractor with mock data"""
         mock_data = pd.DataFrame({
-            'flowid': ['1', '2'],
-            'sourceip': ['192.168.1.1', '192.168.1.2'],
-            'label': ['BENIGN', 'DDoS']
+            'Flow ID': ['1', '2'],
+            ' Source IP': ['192.168.1.1', '192.168.1.2'],
+            ' Label': ['BENIGN', 'DDoS']
         })
         processor = CICIDS2017Processor(self.config)
         df = processor.load_data_from_df(mock_data)

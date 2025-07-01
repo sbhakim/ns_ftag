@@ -40,13 +40,19 @@ class SecurityEventDataset(Dataset):
         security_features = torch.tensor(self.feature_extractor.extract_security_features(events), dtype=torch.float32)
         targets = self.label_extractor.extract_labels(events)
         true_edges = self.relationship_extractor.extract_true_edges(events)
+        
+        # --- NEW: Extract temporal_info (timestamps) ---
+        # Ensure 'timestamp' column exists and is in datetime format from preprocessing
+        temporal_info = events['timestamp'].tolist() 
+
         return {
             'entities': torch.tensor(entities_actions['source_entity_ids'], dtype=torch.long),
             'actions': torch.tensor(entities_actions['action_ids'], dtype=torch.long),
             'edge_index': edge_index,
             'security_features': security_features,
             'targets': targets,
-            'true_edges': true_edges
+            'true_edges': true_edges,
+            'temporal_info': temporal_info # NEW ADDITION
         }
 
     def __len__(self):

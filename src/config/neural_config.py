@@ -59,6 +59,23 @@ class NeuralConfig:
     min_sequence_length: int = 10       # Minimum window length
     security_feature_dim: int = 10       # Number of per-node security features
 
+    # --- NEW CONFIGURATIONS FOR ENHANCED GRAPH BUILDER ---
+    # Temporal constraint for edge validation (in seconds)
+    # E.g., 3600s = 1 hour. Events more than this gap apart won't form an edge (unless specifically allowed)
+    max_attack_step_gap: int = 3600 # Default to 1 hour (3600 seconds)
+
+    # Weights for multi-criteria path scoring (for extract_ranked_attack_paths)
+    path_scoring_weights: Dict[str, float] = field(default_factory=lambda: {
+        'probability': 0.3,          # Weight for average attack probability of nodes in path
+        'edge_confidence': 0.3,      # Weight for average confidence of edges in path
+        'temporal': 0.2,             # Weight for temporal consistency/validity of path
+        'mitre': 0.2                 # Weight for MITRE coherence of path (Phase 2)
+    })
+    
+    # Cutoff for simple path extraction in NetworkX (to prevent computational explosion)
+    # e.g., max path length or depth to explore. 0 means no limit.
+    path_extraction_cutoff: int = 6 # Default max path length to 6 hops
+
     def __post_init__(self):
         """Validate and normalize data path, setup logging, and check file system access."""
         # Setup logging

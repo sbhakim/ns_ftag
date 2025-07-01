@@ -35,7 +35,7 @@ class NeuralAttackGraphPipeline(nn.Module):
 
         return predictions
 
-    def get_attack_graph(self, batch: Dict[str, torch.Tensor]) -> List[Dict[str, Any]]:
+    def get_attack_graph(self, batch: Dict[str, Any]) -> List[Dict[str, Any]]:
         """
         Generate attack graph data from neural predictions and attention for a batch.
         Uses DynamicAttackGraphBuilder to construct graphs and extract edges.
@@ -61,10 +61,18 @@ class NeuralAttackGraphPipeline(nn.Module):
             num_sequences_in_batch = batch['entities'].shape[0]
             nodes_per_sequence = batch['entities'].shape[1]  # Number of nodes in each sequence
 
+            # --- ADDITION: Extract temporal_info from batch ---
+            # Assuming 'temporal_info' is a List[List[pd.Timestamp]] or similar
+            # that was collated by custom_collate_fn
+            temporal_info_batch = batch.get('temporal_info', [[]] * num_sequences_in_batch) 
+            # Default to empty lists if not present, to avoid errors
+
+
             for i in range(num_sequences_in_batch):
                 # Extract attention and predictions for current sequence
                 current_attention_map = avg_attention[i]  # (num_nodes, num_nodes)
                 current_entities = batch['entities'][i].cpu().tolist()  # Entity IDs as nodes
+                current_temporal_info = temporal_info_batch[i] # Get temporal info for current sequence
 
                 # Extract per-node predictions for this sequence
                 start_idx = i * nodes_per_sequence
@@ -78,10 +86,12 @@ class NeuralAttackGraphPipeline(nn.Module):
                 }
 
                 # Build graph using DynamicAttackGraphBuilder
+                # --- CHANGE: Pass temporal_info to build_attack_graph ---
                 graph = self.graph_builder.build_attack_graph(
                     node_entities=current_entities,
                     predictions=current_predictions,
-                    attention_map=current_attention_map
+                    attention_map=current_attention_map,
+                    temporal_info=current_temporal_info # NEW ARGUMENT
                 )
 
                 # Extract edges from the graph
@@ -91,7 +101,8 @@ class NeuralAttackGraphPipeline(nn.Module):
                     'node_entities': current_entities,
                     'attention_map': current_attention_map,
                     'predictions': current_predictions,
-                    'edges': edges  # Add edges to the dictionary
+                    'edges': edges,  # Add edges to the dictionary
+                    'temporal_info': current_temporal_info # Also add temporal_info for context in evaluation/logging
                 })
 
             return graphs_data

@@ -8,6 +8,10 @@ import numpy as np
 import pandas as pd
 import logging
 import time
+
+# Add src to path
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
 from evaluators.neural_evaluator import NeuralAttackGraphEvaluator
 from neural_components.neural_pipeline import NeuralAttackGraphPipeline
 from data_processors.dataset import SecurityEventDataset
@@ -129,7 +133,7 @@ class TestIntegration(unittest.TestCase):
             ' Destination IP': ['10.0.0.1', '10.0.0.2', '10.0.0.1', '10.0.0.3', '10.0.0.2'],
             ' Destination Port': [80, 80, 443, 80, 443],
             ' Protocol': ['TCP', 'TCP', 'UDP', 'TCP', 'UDP'],
-            ' Timestamp': ['2023-01-01 00:00:00', '2023-01-01 00:00:01', '2023-01-01 00:00:02', '2023-01-01 00:00:03', '2023-01-01 00:00:04'],
+            ' Timestamp': ['7/7/2017 15:00:00', '7/7/2017 15:00:01', '7/7/2017 15:00:02', '7/7/2017 15:00:03', '7/7/2017 15:00:04'],
             ' Total Fwd Packets': [10, 20, 15, 25, 30],
             ' Total Backward Packets': [5, 10, 8, 12, 15],
             ' Total Length of Fwd Packets': [1000, 2000, 1500, 2500, 3000],
@@ -168,12 +172,12 @@ class TestIntegration(unittest.TestCase):
         """Test data processing with malformed data."""
         self.logger.info("Starting test_data_processing_edge_cases")
         mock_data = pd.DataFrame({
-            'flowid': ['1', '2', '3'],
-            'sourceip': ['192.168.1.1', None, '192.168.1.2'],
-            'destinationport': [80, 80, 443],
-            'protocol': ['TCP', 'TCP', 'UDP'],
-            'timestamp': ['invalid', '2023-01-01 00:00:01', None],
-            'label': ['BENIGN', 'DDoS', 'BENIGN']
+            'Flow ID': ['1', '2', '3'],
+            ' Source IP': ['192.168.1.1', None, '192.168.1.2'],
+            ' Destination Port': [80, 80, 443],
+            ' Protocol': ['TCP', 'TCP', 'UDP'],
+            ' Timestamp': ['invalid', '7/7/2017 15:00:01', None],
+            ' Label': ['BENIGN', 'DDoS', 'BENIGN']
         })
 
         processor = CICIDS2017Processor(self.config)
@@ -186,12 +190,12 @@ class TestIntegration(unittest.TestCase):
         """Test data processing with missing essential columns."""
         self.logger.info("Starting test_data_processing_missing_columns")
         mock_data = pd.DataFrame({
-            'flowid': ['1', '2', '3'],
-            'sourceport': [12345, 12346, 12347],
-            'destinationport': [80, 80, 443],
-            'protocol': ['TCP', 'TCP', 'UDP'],
-            'timestamp': ['2023-01-01 00:00:00', '2023-01-01 00:00:01', '2023-01-01 00:00:02'],
-            'label': ['BENIGN', 'DDoS', 'BENIGN']
+            'Flow ID': ['1', '2', '3'],
+            ' Source Port': [12345, 12346, 12347],
+            ' Destination Port': [80, 80, 443],
+            ' Protocol': ['TCP', 'TCP', 'UDP'],
+            ' Timestamp': ['7/7/2017 15:00:00', '7/7/2017 15:00:01', '7/7/2017 15:00:02'],
+            ' Label': ['BENIGN', 'DDoS', 'BENIGN']
         })
         processor = CICIDS2017Processor(self.config)
         with self.assertRaises(ValueError, msg="Should raise error for missing essential columns"):
@@ -215,6 +219,24 @@ class TestIntegration(unittest.TestCase):
         processing_rate = len(processed_df) / max(elapsed_time, 1e-10)
         self.assertGreater(processing_rate, 1000, f"Processing rate {processing_rate:.2f} events/second below required 1000 events/second")
         self.logger.info(f"Completed test_data_processing_real_subset: {len(processed_df)} rows processed in {elapsed_time:.3f} seconds")
+
+    def test_data_processing_timestamp_formats(self):
+        """Test timestamp parsing with CICIDS2017 dataset formats."""
+        self.logger.info("Starting test_data_processing_timestamp_formats")
+        mock_data = pd.DataFrame({
+            'Flow ID': ['1', '2', '3'],
+            ' Source IP': ['192.168.1.1', '192.168.1.1', '192.168.1.2'],
+            ' Source Port': [12345, 12346, 12347],
+            ' Destination IP': ['10.0.0.1', '10.0.0.2', '10.0.0.1'],
+            ' Destination Port': [80, 80, 443],
+            ' Protocol': ['TCP', 'TCP', 'UDP'],
+            ' Timestamp': ['7/7/2017 15:00:00', '07/07/2017 15:00:01', '7-7-2017 15:00:02'],
+            ' Label': ['BENIGN', 'DDoS', 'BENIGN']
+        })
+        processor = CICIDS2017Processor(self.config)
+        processed_df = processor.preprocess(processor.load_data_from_df(mock_data))
+        self.assertFalse(processed_df['timestamp'].isna().any(), "Timestamps should be parsed without NaNs")
+        self.logger.info("Completed test_data_processing_timestamp_formats")
 
     def test_pipeline_evaluation(self):
         """Test pipeline with evaluator using dummy data."""
