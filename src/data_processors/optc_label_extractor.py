@@ -54,8 +54,8 @@ class OpTCLabelExtractor(LabelExtractor): # Inherit from base for common config/
             self.logger.error("Missing required 'label' or 'attack_presence' column from OpTCProcessor output.")
             raise ValueError("Required label columns missing for OpTCLabelExtractor.")
 
-        # Ensure 'label' column is string type for mapping
-        events_df['label'] = events_df['label'].astype(str)
+        # --- FIX: Avoid SettingWithCopyWarning by using .loc for assignment ---
+        events_df.loc[:, 'label'] = events_df['label'].astype(str)
 
         # 1. Attack Presence (Binary: 0=BENIGN, 1=ATTACK)
         # Directly use 'attack_presence' column from OpTCProcessor

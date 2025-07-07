@@ -7,6 +7,7 @@ from .base_processor import BaseSecurityEventProcessor
 from typing import Any, Dict, List
 import json # Explicitly import json module
 import sys # For better stream handler setup
+import numpy as np # For np.inf, np.nan
 
 class OpTCProcessor(BaseSecurityEventProcessor):
     def __init__(self, config: Any):
@@ -101,21 +102,12 @@ class OpTCProcessor(BaseSecurityEventProcessor):
             return pd.DataFrame()
 
         # --- Step 1: Flattening nested JSON (if 'datum' or other nested fields exist) ---
-        # This is where you would unpack complex nested eCAR schema fields like 'datum', 'subject', 'predicateObject', etc.
         # This part is highly dependent on your exact JSON schema.
-        # Example for a common CDM schema structure:
         unpacked_data = []
-        if 'datum' in df.columns: # Assuming the main event data is under 'datum'
+        if 'datum' in df.columns:
             self.logger.info("Unpacking 'datum' column...")
             try:
-                # Common CDM structure: 'datum' contains a single key like 'com.bbn.tc.schema.avro.cdm18.Event'
-                # or similar for Subject, Principle, etc.
-                # Use .apply(lambda x: x.get(KEY)) to safely access nested dicts, then json_normalize
-                
-                # Check for the common nested schema key in 'datum'
                 if not df['datum'].empty and isinstance(df['datum'].iloc[0], dict):
-                    # Try to find the event-specific key, e.g., 'com.bbn.tc.schema.avro.cdm18.Event'
-                    # Or 'com.bbn.tc.schema.avro.cdm18.Subject' for subject records
                     first_datum_keys = list(df['datum'].iloc[0].keys())
                     event_key = next((k for k in first_datum_keys if 'Event' in k), None)
                     subject_key = next((k for k in first_datum_keys if 'Subject' in k), None)
@@ -132,60 +124,59 @@ class OpTCProcessor(BaseSecurityEventProcessor):
                         unpacked_data = pd.json_normalize(df['datum'].apply(lambda x: x.get(principle_key) if isinstance(x, dict) else {}))
                     else:
                         self.logger.warning("No specific CDM schema key found in 'datum'. Normalizing 'datum' directly (might be flat).")
-                        unpacked_data = pd.json_normalize(df['datum']) # Fallback if datum is already flat dict
+                        unpacked_data = pd.json_normalize(df['datum'])
                 else:
                     self.logger.warning("'datum' column does not contain dictionaries. Skipping unpacking.")
-                    unpacked_data = pd.DataFrame() # Empty DataFrame if datum is not dict
+                    unpacked_data = pd.DataFrame()
                 
                 if not unpacked_data.empty:
-                    # Rename columns to avoid clashes and standardize
                     unpacked_data.columns = [col.replace('.', '_').lower() for col in unpacked_data.columns]
-                    # Drop original 'datum' and concatenate unpacked data
                     df = pd.concat([df.drop(columns=['datum']), unpacked_data], axis=1)
                     self.logger.info(f"Successfully unpacked 'datum' column. New DataFrame shape: {df.shape}")
                 else:
                     self.logger.warning("Unpacked 'datum' resulted in empty DataFrame or no data. Original DataFrame used.")
 
             except Exception as e:
-                self.logger.error(f"Error unpacking 'datum' column: {e}. Proceeding with original DataFrame structure.", exc_info=True) # exc_info to print traceback
+                self.logger.error(f"Error unpacking 'datum' column: {e}. Proceeding with original DataFrame structure.", exc_info=True)
 
         # --- Step 2: General Column Cleaning and Standardization ---
-        # Convert all column names to lowercase and replace dots with underscores
         df.columns = df.columns.str.lower().str.replace('.', '_', regex=False)
         self.logger.info(f"Columns after initial cleaning: {list(df.columns[:10])}...")
 
         # --- Step 3: Renaming to standard internal names ---
         # This mapping is CRUCIAL. You must adjust this to match YOUR ACTUAL OpTC JSON fields
-        # derived from Step 1's unpacking and raw top-level keys.
-        # Example: if your JSON has 'com.bbn.tc.schema.avro.cdm18.Event.type', after flattening it might be 'event_type'.
-        # You then map 'event_type' to 'action' as per the generic pipeline expectation.
         column_rename_map = {
-            'uuid': 'event_id', # Top-level UUID for the record/event
-            'event_timestamp_nanos': 'timestamp', # Example if timestamp is in nanoseconds
-            'datum_event_type': 'action', # Common after unpacking 'datum'
-            'datum_subject_uuid': 'subject_id', # Common after unpacking 'datum'
-            'datum_predicateobject_uuid': 'object_id', # Common after unpacking 'datum'
-            'datum_predicateobject_path': 'file_path', # Example for file path
-            'datum_subject_properties_map_cmdline': 'process_name', # Example for process name
-            'datum_subject_pid': 'pid', # Example for pid
-            'datum_subject_ppid': 'ppid', # Example for ppid
-            'datum_netflow_localaddress': 'network_src_addr', # Example network fields
+            'uuid': 'event_id',
+            'event_timestamp_nanos': 'timestamp',
+            'datum_event_type': 'action',
+            'datum_subject_uuid': 'subject_id',
+            'datum_predicateobject_uuid': 'object_id',
+            'datum_predicateobject_path': 'file_path',
+            'datum_subject_properties_map_cmdline': 'process_name',
+            'datum_subject_pid': 'pid',
+            'datum_subject_ppid': 'ppid',
+            'datum_netflow_localaddress': 'network_src_addr',
             'datum_netflow_remoteaddress': 'network_dst_addr',
             'datum_netflow_localport': 'network_src_port',
             'datum_netflow_remoteport': 'network_dst_port',
-            'datum_syscall': 'syscall', # Example for syscall
-            'datum_principal_uuid': 'principal_id', # If you have a separate principal UUID
-            'datum_host_hostname': 'hostname', # Example hostname field
-            'datum_thread_tid': 'tid', # Example for thread ID
-            'datum_return_value': 'return_value', # Example for return value
-            'datum_properties': 'properties_json' # If properties field is a dict that gets stringified
+            'datum_syscall': 'syscall',
+            'datum_principal_uuid': 'principal_id',
+            'datum_host_hostname': 'hostname',
+            'datum_thread_tid': 'tid',
+            'datum_return_value': 'return_value',
+            'datum_properties': 'properties_json'
         }
         df = df.rename(columns=column_rename_map, errors='ignore')
         self.logger.info(f"Columns after renaming to standard names: {list(df.columns[:10])}...")
 
-        # --- Step 4: Ensure essential columns exist and fill with UNKNOWN/defaults ---
-        # These are the columns OpTCEntityManager, OpTCFeatureExtractor, etc., directly expect.
-        # Add to this list as more specific features/entities are needed.
+        # --- Step 4: Apply Dataset Subsetting (New Feature) ---
+        if self.config.subset_config and self.config.subset_config.get('enabled', False):
+            df = self._apply_subset_filter(df)
+            if df.empty:
+                self.logger.warning("DataFrame is empty after subset filtering. Returning empty DataFrame.")
+                return pd.DataFrame()
+        
+        # --- Step 5: Ensure essential columns exist and fill with UNKNOWN/defaults ---
         essential_cols_for_pipeline = [
             'event_id', 'subject_id', 'object_id', 'action', 'timestamp',
             'file_path', 'process_name', 'pid', 'ppid', 'hostname',
@@ -198,45 +189,39 @@ class OpTCProcessor(BaseSecurityEventProcessor):
                 self.logger.warning(f"Missing essential OpTC column '{col}'. Filling with default/UNKNOWN.")
                 if col in ['pid', 'ppid', 'network_src_port', 'network_dst_port', 'tid']:
                     df[col] = -1
-                elif 'timestamp' in col:
-                    df[col] = pd.NaT # Handled in next step
+                elif col == 'timestamp': # Timestamp handled separately
+                    df[col] = pd.NaT 
                 else:
                     df[col] = 'UNKNOWN'
             # Ensure proper dtypes for known numeric columns that might be 'UNKNOWN'
             if col in ['pid', 'ppid', 'network_src_port', 'network_dst_port', 'tid', 'return_value']:
-                df[col] = pd.to_numeric(df[col], errors='coerce').fillna(-1).astype(int) # -1 for missing numeric
-            elif col == 'timestamp': # Handled separately below
-                pass
-            else: # All other essential columns, ensure string type
+                df[col] = pd.to_numeric(df[col], errors='coerce').fillna(-1).astype(int)
+            elif col == 'timestamp':
+                pass # Handled in step 6
+            else:
                 df[col] = df[col].astype(str)
         self.logger.info(f"Columns after ensuring essential cols: {list(df.columns[:10])}...")
 
 
-        # --- Step 5: Timestamp Conversion and Handling ---
-        # This needs to be robust for OpTC's various timestamp formats (nanoseconds, ISO string, etc.)
+        # --- Step 6: Timestamp Conversion and Handling ---
         if 'timestamp' in df.columns:
-            # First, try nanoseconds since epoch (common for CDM)
-            # Use errors='coerce' to turn unparseable values into NaT
             df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ns', errors='coerce')
 
-            # If that failed, try ISO format or other common strings
             if df['timestamp'].isna().any():
                 self.logger.warning(f"{df['timestamp'].isna().sum()} invalid timestamps after nanosecond conversion. Attempting string parsing.")
-                # Attempt string parsing for remaining NaT values
-                df['timestamp'] = df['timestamp'].fillna(pd.to_datetime(df['timestamp_original_string_col'], errors='coerce')) # if you kept an original string col
+                # If your original timestamp string column existed and was renamed, use it here if needed
+                # df['timestamp'] = df['timestamp'].fillna(pd.to_datetime(df['original_timestamp_string_col'], errors='coerce'))
                 
-                # Iterate through common formats if still NaT
                 common_formats = [
-                    '%Y-%m-%dT%H:%M:%S.%fZ', # ISO format with milliseconds and Z (UTC)
-                    '%Y-%m-%dT%H:%M:%S.%f',  # ISO format with milliseconds
-                    '%Y-%m-%dT%H:%M:%SZ',    # ISO format without milliseconds
-                    '%Y-%m-%dT%H:%M:%S',     # ISO format basic
-                    '%Y-%m-%d %H:%M:%S.%f',  # Space instead of T
+                    '%Y-%m-%dT%H:%M:%S.%fZ',
+                    '%Y-%m-%dT%H:%M:%S.%f',
+                    '%Y-%m-%dT%H:%M:%SZ',
+                    '%Y-%m-%dT%H:%M:%S',
+                    '%Y-%m-%d %H:%M:%S.%f',
                     '%Y-%m-%d %H:%M:%S'
                 ]
-                initial_nan_count = df['timestamp'].isna().sum()
                 for fmt in common_formats:
-                    if df['timestamp'].isna().any(): # Only try if there are still NaTs
+                    if df['timestamp'].isna().any():
                         df.loc[df['timestamp'].isna(), 'timestamp'] = pd.to_datetime(
                             df.loc[df['timestamp'].isna(), 'timestamp'].astype(str), format=fmt, errors='coerce'
                         )
@@ -252,11 +237,9 @@ class OpTCProcessor(BaseSecurityEventProcessor):
             self.logger.critical("No 'timestamp' column found after preprocessing. This is critical for temporal ordering.")
             raise ValueError("Timestamp column missing. Cannot proceed.")
         
-        # --- Step 6: Derive 'object_type' from event structure or heuristics ---
-        # OpTC/CDM often implies object_type from event type (action) or specific fields
+        # --- Step 7: Derive 'object_type' from event structure or heuristics ---
         if 'object_type' not in df.columns:
             self.logger.info("Deriving 'object_type' column based on 'action' or other fields.")
-            # This is a heuristic. Customize based on your OpTC data's semantics.
             def derive_object_type(row):
                 action = str(row['action']).lower()
                 if 'file' in action or 'read' in action or 'write' in action or 'create' in action or 'delete' in action:
@@ -271,33 +254,34 @@ class OpTCProcessor(BaseSecurityEventProcessor):
                         return 'PROCESS'
                 if 'registry' in action or 'reg' in action:
                     return 'REGISTRYKEY'
-                return 'UNKNOWN' # Default or other generic type
+                return 'UNKNOWN'
             df['object_type'] = df.apply(derive_object_type, axis=1)
             self.logger.info(f"Derived 'object_type' distribution: {df['object_type'].value_counts().to_dict()}")
 
 
-        # --- Step 7: Ground Truth Labeling (CRITICAL for supervised learning) ---
-        # The placeholder assumes all are benign or maps 'attack_presence' directly.
-        # In a real scenario, you would load OpTCRedTeamGroundTruth.pdf and join/map event UUIDs.
+        # --- Step 8: Ground Truth Labeling (CRITICAL for supervised learning) ---
         if 'attack_presence' not in df.columns:
             self.logger.warning("No 'attack_presence' column found. Adding dummy 'attack_presence' (all benign).")
-            df['attack_presence'] = 0 # Default to benign
+            df['attack_presence'] = 0
         
         if 'label' not in df.columns:
-            # Map attack_presence (0/1) to 'BENIGN'/'ATTACK' or specific T-codes if available from ground truth.
             df['label'] = df['attack_presence'].apply(lambda x: 'BENIGN' if x == 0 else 'ATTACK')
             self.logger.warning("Dummy 'label' column created. Implement real ground truth mapping using OpTCRedTeamGroundTruth.pdf.")
         
-        # Ensure label column is string type before value_counts later in LabelExtractor
         df['label'] = df['label'].astype(str)
         self.logger.info(f"Final label distribution: {df['label'].value_counts().to_dict()}")
 
 
-        # --- Step 8: Final Cleanup and Sorting ---
+        # --- Step 9: Final Cleanup and Sorting ---
         # Drop rows with NaNs in absolutely critical columns after all imputation/derivation.
         final_critical_cols = ['event_id', 'subject_id', 'action', 'timestamp', 'label', 'object_type']
         initial_rows_before_final_dropna = len(df)
-        df.dropna(subset=final_critical_cols, inplace=True)
+        # Ensure all columns in final_critical_cols exist in df before dropping
+        existing_critical_cols = [col for col in final_critical_cols if col in df.columns]
+        if len(existing_critical_cols) < len(final_critical_cols):
+            self.logger.warning(f"Some final critical columns for dropna are missing from DataFrame: {set(final_critical_cols) - set(existing_critical_cols)}. Proceeding with existing.")
+
+        df.dropna(subset=existing_critical_cols, inplace=True)
         dropped_rows_final = initial_rows_before_final_dropna - len(df)
         if dropped_rows_final > 0:
             self.logger.warning(f"Dropped {dropped_rows_final} rows with NaN in final critical columns after all preprocessing steps.")
@@ -306,4 +290,56 @@ class OpTCProcessor(BaseSecurityEventProcessor):
         self.logger.info("DataFrame sorted by timestamp.")
 
         self.logger.info(f"Final preprocessed OpTC DataFrame: {len(df)} rows, {len(df.columns)} columns.")
+        return df
+
+    def _apply_subset_filter(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Applies subset selection based on configuration.
+        Assumes 'timestamp' column is already in datetime format.
+        """
+        subset_config = self.config.subset_config
+        if not subset_config or not subset_config.get('enabled', False):
+            self.logger.info("Subset filtering is disabled. Using full DataFrame.")
+            return df
+
+        initial_rows = len(df)
+        self.logger.info(f"Applying subset filter to {initial_rows} events.")
+
+        # Temporal filtering
+        if subset_config.get('type') == 'temporal_window':
+            start_date_str = subset_config.get('start_date')
+            end_date_str = subset_config.get('end_date')
+            
+            if start_date_str and end_date_str and 'timestamp' in df.columns:
+                try:
+                    start_ts = pd.to_datetime(start_date_str)
+                    end_ts = pd.to_datetime(end_date_str)
+                    df = df[(df['timestamp'] >= start_ts) & (df['timestamp'] <= end_ts)].copy()
+                    self.logger.info(f"Temporal filter applied ({start_ts} to {end_ts}). Events remaining: {len(df)}")
+                except Exception as e:
+                    self.logger.error(f"Error applying temporal filter: {e}. Skipping temporal filter.", exc_info=True)
+        
+        # Host sampling
+        max_hosts = subset_config.get('max_hosts')
+        if max_hosts and 'hostname' in df.columns and df['hostname'].nunique() > max_hosts:
+            unique_hosts = df['hostname'].unique()
+            # For consistent subsetting, sort hosts before selection
+            sorted_hosts = np.sort(unique_hosts)
+            selected_hosts = sorted_hosts[:max_hosts]
+            df = df[df['hostname'].isin(selected_hosts)].copy()
+            self.logger.info(f"Host sampling applied. Selected {len(selected_hosts)} hosts. Events remaining: {len(df)}")
+
+        # Random sampling
+        sample_fraction = subset_config.get('sample_fraction')
+        if sample_fraction is not None and 0 < sample_fraction < 1:
+            df = df.sample(frac=sample_fraction, random_state=42).copy()
+            self.logger.info(f"Random sample applied (frac={sample_fraction}). Events remaining: {len(df)}")
+
+        # Max events limit (applied after other filters)
+        max_events = subset_config.get('max_events')
+        if max_events is not None and len(df) > max_events:
+            df = df.head(max_events).copy() # Use .head() or .sample() if random is desired
+            self.logger.info(f"Max events limit applied. Retained {len(df)} events.")
+
+        self.logger.info(f"Subset filtering: {len(df)} events retained from {initial_rows} original (post-loading, pre-final-prep).")
         return df

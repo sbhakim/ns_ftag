@@ -1,7 +1,7 @@
 # src/config/neural_config.py
 
 from dataclasses import dataclass, field
-from typing import Dict, List
+from typing import Dict, List, Any # Import Any for subset_config's type
 import os
 import logging
 import stat
@@ -81,7 +81,7 @@ class NeuralConfig:
     # === NEW: OpTC-Specific Parameters ===
     # Updated optc_ecar_path to point to the actual directory containing JSON files
     # This path is relative to the NS_FTAG_DATA_PATH for OpTC, which is /media/safayat/second_ssd/Cyber-Project/ns_ftag_cyber/data/datasets/OpTC-data
-    optc_ecar_path: str = os.path.join("ecar", "short", "17-18Sep19", "AIA-176-200") # Changed path
+    optc_ecar_path: str = os.path.join("ecar", "short", "17-18Sep19", "AIA-176-200")
     optc_evaluation_path: str = "evaluation"
     optc_benign_path: str = "benign"
     optc_ground_truth_path: str = "OpTCRedTeamGroundTruth.pdf"
@@ -90,6 +90,18 @@ class NeuralConfig:
     optc_entity_vocab_size: int = 100000  # Much larger for system entities
     optc_action_vocab_size: int = 1000    # More diverse system actions
 
+    # === NEW: Dataset Subsetting Parameters ===
+    # Use this to define a subset of data for faster experimentation during development.
+    # Set to None to use the full dataset.
+    subset_config: Dict[str, Any] = field(default_factory=lambda: {
+        'enabled': True, # Set to False to use the full dataset
+        'type': 'temporal_window', # Options: 'temporal_window', 'random_sample', 'attack_focus'
+        'start_date': '2019-09-17 00:00:00', # For 'temporal_window'
+        'end_date': '2019-09-24 23:59:59',   # For 'temporal_window' (e.g., 7 days of data)
+        'max_hosts': None, # Optional: Limit number of hosts for 'temporal_window' or 'random_sample'
+        'sample_fraction': None, # For 'random_sample': e.g., 0.1 for 10%
+        'max_events': 500000 # Optional: Maximum number of events to retain after other filters
+    })
 
     def __post_init__(self):
         """Validate and normalize data path, setup logging, and check file system access."""
