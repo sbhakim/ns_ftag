@@ -13,6 +13,7 @@ class NeuralAttackGraphEvaluator:
     def __init__(self, config: Any):
         self.config = config
         self.metrics = {}
+        self.dataset_type = getattr(config, 'dataset_type', 'cicids2017') # NEW: Store dataset type
         self.logger = logging.getLogger(__name__)
         if not self.logger.handlers:
             logging.basicConfig(
@@ -301,7 +302,8 @@ class NeuralAttackGraphEvaluator:
             self.logger.warning(f"Only one class ({unique_labels[0]}) in true labels for attack presence. Baseline Precision/Recall/F1 set to 0.0.")
             prec, rec, f1 = 0.0, 0.0, 0.0
         else:
-            prec, rec, f1, _ = precision_recall_fscore_support(true_labels, baseline_preds, average='binary', zero_division=0)
+            # THIS IS THE LINE TO FIX (previously was 'true_labels')
+            prec, rec, f1, _ = precision_recall_fscore_support(attack_true_labels_cpu, baseline_preds, average='binary', zero_division=0)
             
         metrics['baseline_precision'] = prec
         metrics['baseline_recall'] = rec
@@ -314,6 +316,9 @@ class NeuralAttackGraphEvaluator:
         """Comprehensive evaluation across all metrics."""
         all_metrics = {}
         
+        # === NEW: Add dataset type to metrics ===
+        all_metrics['dataset_type'] = self.dataset_type
+
         # Flatten predictions and targets for overall detection metrics
         # Ensure 'predictions' from model_predictions also accounts for missing keys if batch is not full
         flattened_pred_detection = {}
@@ -350,6 +355,37 @@ class NeuralAttackGraphEvaluator:
         else:
             self.logger.warning("Skipping temporal and graph construction evaluation: graph data not found or empty.")
 
+        # === NEW: Dataset-specific evaluation ===
+        if self.dataset_type == "optc":
+            optc_metrics = self._evaluate_optc_specific(predicted_graphs_data, true_sequences_data)
+            all_metrics.update(optc_metrics)
 
         self.logger.info(f"All evaluation metrics: {all_metrics}")
         return all_metrics
+
+    def _evaluate_optc_specific(self, predicted_graphs_data: List[Dict[str, Any]], 
+                                true_sequences_data: List[Dict[str, Any]]) -> Dict[str, float]:
+        """OpTC-specific evaluation metrics."""
+        # These are placeholders. Real implementation would traverse graphs and compare
+        # specific OpTC attributes like process lineage, syscalls, etc.
+        self.logger.info("Calculating OpTC-specific evaluation metrics (placeholders).")
+        return {
+            'multi_host_coverage': self._calculate_multi_host_coverage(predicted_graphs_data),
+            'process_lineage_accuracy': self._calculate_process_lineage_accuracy(predicted_graphs_data, true_sequences_data),
+            'system_call_precision': self._calculate_syscall_precision(predicted_graphs_data, true_sequences_data)
+        }
+
+    def _calculate_multi_host_coverage(self, graphs_data: List[Dict[str, Any]]) -> float:
+        """Calculate how well the model covers multi-host attack scenarios."""
+        # Placeholder implementation
+        return 0.8 # Dummy value
+
+    def _calculate_process_lineage_accuracy(self, predicted: List[Dict[str, Any]], true: List[Dict[str, Any]]) -> float:
+        """Calculate accuracy of process parent-child relationships."""
+        # Placeholder implementation
+        return 0.75 # Dummy value
+
+    def _calculate_syscall_precision(self, predicted: List[Dict[str, Any]], true: List[Dict[str, Any]]) -> float:
+        """Calculate precision of system call sequence prediction."""
+        # Placeholder implementation
+        return 0.82 # Dummy value

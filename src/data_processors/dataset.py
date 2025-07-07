@@ -6,17 +6,52 @@ import pandas as pd
 from typing import Dict, List, Any
 
 class SecurityEventDataset(Dataset):
-    def __init__(self, data_path: str, config: Any, processor: Any, entity_manager: Any, relationship_extractor: Any, feature_extractor: Any, label_extractor: Any):
+    def __init__(self, data_path: str, config: Any, processor: Any = None, entity_manager: Any = None, 
+                 relationship_extractor: Any = None, feature_extractor: Any = None, label_extractor: Any = None):
         self.config = config
-        self.processor = processor
-        self.entity_manager = entity_manager
-        self.relationship_extractor = relationship_extractor
-        self.feature_extractor = feature_extractor
-        self.label_extractor = label_extractor
+        
+        # === NEW: Auto-select components based on dataset type ===
+        if processor is None or entity_manager is None or relationship_extractor is None or feature_extractor is None or label_extractor is None:
+            self._auto_select_components()
+        else:
+            # Use provided components (for backward compatibility)
+            self.processor = processor
+            self.entity_manager = entity_manager
+            self.relationship_extractor = relationship_extractor
+            self.feature_extractor = feature_extractor
+            self.label_extractor = label_extractor
+                
         self.events_df = self.processor.load_data(data_path)
         self.sequences = self._create_sequences()
         self.config.entity_vocab_size = self.entity_manager.get_vocab_sizes()['entity_vocab_size']
         self.config.action_vocab_size = self.entity_manager.get_vocab_sizes()['action_vocab_size']
+
+    def _auto_select_components(self):
+        """Auto-select dataset-specific components based on config.dataset_type."""
+        if self.config.dataset_type == "optc": 
+            from .optc_processor import OpTCProcessor
+            from .optc_entity_manager import OpTCEntityManager
+            from .optc_relationship_extractor import OpTCRelationshipExtractor
+            from .optc_feature_extractor import OpTCFeatureExtractor
+            from .optc_label_extractor import OpTCLabelExtractor
+                        
+            self.processor = OpTCProcessor(self.config)
+            self.entity_manager = OpTCEntityManager()
+            self.relationship_extractor = OpTCRelationshipExtractor(self.config)
+            self.feature_extractor = OpTCFeatureExtractor(self.config)
+            self.label_extractor = OpTCLabelExtractor(self.config)
+        else:  # Default to CICIDS2017
+            from .cicids2017_processor import CICIDS2017Processor
+            from .entity_manager import EntityManager
+            from .relationship_extractor import RelationshipExtractor
+            from .feature_extractor import FeatureExtractor
+            from .label_extractor import LabelExtractor
+                        
+            self.processor = CICIDS2017Processor(self.config)
+            self.entity_manager = EntityManager()
+            self.relationship_extractor = RelationshipExtractor(self.config)
+            self.feature_extractor = FeatureExtractor(self.config)
+            self.label_extractor = LabelExtractor(self.config)
 
     def _create_sequences(self) -> List[Dict[str, Any]]:
         """Create temporal sequences from security events."""
@@ -43,7 +78,7 @@ class SecurityEventDataset(Dataset):
         
         # --- NEW: Extract temporal_info (timestamps) ---
         # Ensure 'timestamp' column exists and is in datetime format from preprocessing
-        temporal_info = events['timestamp'].tolist() 
+        temporal_info = events['timestamp'].tolist()
 
         return {
             'entities': torch.tensor(entities_actions['source_entity_ids'], dtype=torch.long),
@@ -52,7 +87,7 @@ class SecurityEventDataset(Dataset):
             'security_features': security_features,
             'targets': targets,
             'true_edges': true_edges,
-            'temporal_info': temporal_info # NEW ADDITION
+            'temporal_info': temporal_info 
         }
 
     def __len__(self):

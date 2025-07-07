@@ -6,19 +6,27 @@ import networkx as nx
 import numpy as np
 import torch.nn.functional as F
 from typing import Dict, List, Tuple, Any
+import logging # Import logging
 
 # Import the new modular components
 from .graph_node_processor import GraphNodeProcessor
-from .graph_edge_constructor import GraphEdgeConstructor # Will be created later
+from .graph_edge_constructor import GraphEdgeConstructor
 
 class DynamicAttackGraphBuilder:
     def __init__(self, config: Any):
         self.config = config
         self.attack_patterns = {}  # Placeholder for learned patterns (e.g., from Phase 2)
+        self.logger = logging.getLogger(__name__) # Initialize logger
+        if not self.logger.handlers: # Basic logging setup if not already configured
+            logging.basicConfig(level=logging.INFO)
+
+        # === NEW: Dataset-aware initialization ===
+        self.dataset_type = getattr(config, 'dataset_type', 'cicids2017')
+        self.logger.info(f"Initializing graph builder for dataset type: {self.dataset_type}")
 
         # Initialize the modular processors/constructors
         self.node_processor = GraphNodeProcessor(config)
-        self.edge_constructor = GraphEdgeConstructor(config) # Uncommented as graph_edge_constructor.py is now provided
+        self.edge_constructor = GraphEdgeConstructor(config) 
 
     def build_attack_graph(self, node_entities: List[Any], predictions: Dict[str, Any], attention_map: np.ndarray, temporal_info: List[Any]) -> nx.DiGraph:
         """
@@ -27,13 +35,18 @@ class DynamicAttackGraphBuilder:
         """
         G = nx.DiGraph()
 
+        # === NEW: Log entity types for debugging ===
+        if self.dataset_type == "optc":
+            self.logger.debug(f"Building OpTC system-level graph with {len(node_entities)} entities")
+        else:
+            self.logger.debug(f"Building CICIDS2017 network-level graph with {len(node_entities)} entities")
+
         # 1. Process and add nodes with enhanced attributes
         node_attributes_list = self.node_processor.process_nodes(node_entities, predictions, temporal_info)
         for i, attrs in enumerate(node_attributes_list):
             G.add_node(i, **attrs)
 
         # 2. Construct and validate edges using the dedicated constructor
-        # Replace the original basic edge construction logic with calls to the new edge constructor
         edges_to_add = self.edge_constructor.construct_edges(G, attention_map, temporal_info, predictions)
         for src, dst, edge_attrs in edges_to_add:
             G.add_edge(src, dst, **edge_attrs)
@@ -77,4 +90,3 @@ class DynamicAttackGraphBuilder:
     # def _compute_path_score(self, graph, path): pass
     # def _temporal_coherence_score(self, graph, path): pass
     # def _mitre_coherence_score(self, graph, path): pass
-

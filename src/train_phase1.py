@@ -14,11 +14,12 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__))))
 
 from neural_components.neural_pipeline import NeuralAttackGraphPipeline
 from data_processors.dataset import SecurityEventDataset
-from data_processors.cicids2017_processor import CICIDS2017Processor
-from data_processors.entity_manager import EntityManager
-from data_processors.relationship_extractor import RelationshipExtractor
-from data_processors.feature_extractor import FeatureExtractor
-from data_processors.label_extractor import LabelExtractor
+# Removed manual imports for processors/managers to rely on auto-selection
+# from data_processors.cicids2017_processor import CICIDS2017Processor
+# from data_processors.entity_manager import EntityManager
+# from data_processors.relationship_extractor import RelationshipExtractor
+# from data_processors.feature_extractor import FeatureExtractor
+# from data_processors.label_extractor import LabelExtractor
 from utils.training_manager import TrainingManager
 from utils.device_manager import DeviceManager
 from utils.performance_monitor import PerformanceMonitor
@@ -45,27 +46,25 @@ def train_phase1():
     logger.info("Starting Phase 1 training...")
     logger.info(f"Neural Config: {neural_config}")
     logger.info(f"Training Config: {training_config}")
+    logger.info(f"Dataset Type: {neural_config.dataset_type}") # NEW: Log dataset type [cite: 574, 575]
 
     device_manager = DeviceManager()
     logger.info(f"Using device: {device_manager.get_device()}")
 
-    processor = CICIDS2017Processor(neural_config)
-    entity_manager = EntityManager()
-    relationship_extractor = RelationshipExtractor(neural_config)
-    feature_extractor = FeatureExtractor(neural_config)
-    label_extractor = LabelExtractor(neural_config)
-
+    # === UPDATED: Simplified dataset creation with auto-selection ===
+    # Components (processor, entity_manager, etc.) will be auto-selected within SecurityEventDataset
     dataset = SecurityEventDataset(
         data_path=neural_config.data_path,
-        config=neural_config,
-        processor=processor,
-        entity_manager=entity_manager,
-        relationship_extractor=relationship_extractor,
-        feature_extractor=feature_extractor,
-        label_extractor=label_extractor
+        config=neural_config
+        # No need to pass individual components - they'll be auto-selected
     )
-    neural_config.entity_vocab_size = entity_manager.get_vocab_sizes()['entity_vocab_size']
-    neural_config.action_vocab_size = entity_manager.get_vocab_sizes()['action_vocab_size']
+    
+    # [cite_start]Vocabulary sizes are now dynamically set in NeuralConfig.__post_init__ based on dataset_type [cite: 574, 575]
+    # and then confirmed by the entity_manager during dataset initialization.
+    # We re-assign here to ensure the model gets the correct, finalized vocab sizes.
+    neural_config.entity_vocab_size = dataset.entity_manager.get_vocab_sizes()['entity_vocab_size']
+    neural_config.action_vocab_size = dataset.entity_manager.get_vocab_sizes()['action_vocab_size']
+    
     dataloader = DataLoader(
         dataset,
         batch_size=neural_config.batch_size,
@@ -73,6 +72,8 @@ def train_phase1():
         collate_fn=custom_collate_fn
     )
     logger.info(f"Dataset loaded with {len(dataset)} sequences.")
+    logger.info(f"Final entity_vocab_size: {neural_config.entity_vocab_size}, action_vocab_size: {neural_config.action_vocab_size}")
+
 
     model = NeuralAttackGraphPipeline(neural_config).to(device_manager.get_device())
     logger.info(f"Model created with {sum(p.numel() for p in model.parameters())} parameters.")
@@ -80,6 +81,7 @@ def train_phase1():
     trainer = TrainingManager(model, neural_config, device_manager)
     evaluator = NeuralAttackGraphEvaluator(neural_config)
     monitor = PerformanceMonitor()
+    
     os.makedirs(training_config.checkpoint_dir, exist_ok=True)
 
     for epoch in range(neural_config.max_epochs):
@@ -101,16 +103,28 @@ def train_phase1():
                     batch_on_device = {k: (v.to(device_manager.get_device()) if isinstance(v, torch.Tensor) else v) for k, v in batch.items()}
                     batch_on_device['targets'] = {k: (v.to(device_manager.get_device()) if isinstance(v, torch.Tensor) else v) for k, v in batch['targets'].items()}
                     predictions = model(batch_on_device)
+                    
+                    # Detach and move to CPU for appending to lists
+                    # Note: attention_weights can be large lists of tensors, might need careful handling if memory becomes an issue
                     all_predictions_from_model.append({k: v.cpu() for k, v in predictions.items() if k != 'attention_weights'})
                     all_targets_from_batch.append({k: v.cpu() for k, v in batch_on_device['targets'].items()})
+                    
+                    # get_attack_graph handles CPU conversion internally
                     predicted_graphs_batch_data = model.get_attack_graph(batch_on_device)
                     all_predicted_graphs_data.extend(predicted_graphs_batch_data)
+                    
+                    # Ensure true_sequences_data contains the necessary info for evaluation
+                    # For temporal evaluation, 'true_edges' is needed.
+                    # For graph construction F1, 'targets' might also be needed for node-level F1, if implemented.
                     for seq_idx in range(batch['entities'].shape[0]):
-                        all_true_sequences_data.append({'true_edges': batch['true_edges'][seq_idx]})
+                        true_seq_item = {'true_edges': batch['true_edges'][seq_idx]}
+                        # If node-level F1 on attack steps is desired, you might need to add targets here
+                        # true_seq_item['targets'] = {k: v[seq_idx].cpu() for k,v in batch['targets'].items()} 
+                        all_true_sequences_data.append(true_seq_item)
 
             monitor.start(f"Epoch {epoch} Evaluation")
             eval_metrics = evaluator.evaluate_all(all_predictions_from_model, all_targets_from_batch,
-                                                 all_predicted_graphs_data, all_true_sequences_data)
+                                                  all_predicted_graphs_data, all_true_sequences_data)
             monitor.stop(f"Epoch {epoch} Evaluation", eval_metrics)
             logger.info(f"Evaluation Metrics: {eval_metrics}")
             model.train()

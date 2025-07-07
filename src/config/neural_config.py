@@ -28,7 +28,9 @@ class NeuralConfig:
     # Dynamic Data Path (must be set via environment or CLI override)
     _current_file_dir: str = os.path.dirname(os.path.abspath(__file__))
     _project_root: str = os.path.abspath(os.path.join(_current_file_dir, '..', '..'))
-    dataset_name: str = "cic_ids2017"  # Options: 'cic_ids2017', 'darpa_tc'
+    
+    # === NEW: Dataset Selection ===
+    dataset_type: str = field(default_factory=lambda: os.environ.get('NS_FTAG_DATASET_TYPE', 'cicids2017'))  # 'cicids2017' or 'optc'
     data_path: str = field(default_factory=lambda: os.environ.get('NS_FTAG_DATA_PATH'))
 
     # Logging Configuration
@@ -49,13 +51,13 @@ class NeuralConfig:
     # Security-Specific Settings
     max_sequence_length: int = 1000
     attention_mechanism: str = "security_aware"
-    entity_vocab_size: int = 5000       # To be updated post-vocab build
-    action_vocab_size: int = 500        # To be updated post-vocab build
+    entity_vocab_size: int = 5000       # To be updated dynamically based on dataset type
+    action_vocab_size: int = 500        # To be updated dynamically based on dataset type
     embedding_dim: int = 64
     num_attack_types: int = 6           # Updated for CICIDS2017: BENIGN, DDoS, PortScan, Web Attack, Bot, Infiltration
     num_mitre_techniques: int = 20      # Adjust per MITRE ATT&CK subset
     attention_threshold: float = 0.1     # For graph-builder edge pruning
-    sequence_window_size: int = 50      # Sliding-window length
+    sequence_window_size: int = 50      # Sliding-window length. Default for CICIDS2017.
     min_sequence_length: int = 10       # Minimum window length
     security_feature_dim: int = 10       # Number of per-node security features
 
@@ -75,6 +77,19 @@ class NeuralConfig:
     # Cutoff for simple path extraction in NetworkX (to prevent computational explosion)
     # e.g., max path length or depth to explore. 0 means no limit.
     path_extraction_cutoff: int = 6 # Default max path length to 6 hops
+
+    # === NEW: OpTC-Specific Parameters ===
+    # Updated optc_ecar_path to point to the actual directory containing JSON files
+    # This path is relative to the NS_FTAG_DATA_PATH for OpTC, which is /media/safayat/second_ssd/Cyber-Project/ns_ftag_cyber/data/datasets/OpTC-data
+    optc_ecar_path: str = os.path.join("ecar", "short", "17-18Sep19", "AIA-176-200") # Changed path
+    optc_evaluation_path: str = "evaluation"
+    optc_benign_path: str = "benign"
+    optc_ground_truth_path: str = "OpTCRedTeamGroundTruth.pdf"
+
+    # OpTC-Specific Vocabularies (larger than network-based)
+    optc_entity_vocab_size: int = 100000  # Much larger for system entities
+    optc_action_vocab_size: int = 1000    # More diverse system actions
+
 
     def __post_init__(self):
         """Validate and normalize data path, setup logging, and check file system access."""
@@ -119,7 +134,7 @@ class NeuralConfig:
             # List files
             files = os.listdir(self.data_path)
             self.logger.info(f"Files in data_path: {files}")
-            # Find CSVs
+            # Find CSVs (only relevant for CICIDS2017 detection at this top level)
             csv_files = glob.glob(os.path.join(self.data_path, '*.[cC][sS][vV]'))
             self.logger.info(f"CSV files found: {csv_files}")
             if not csv_files:
@@ -148,3 +163,13 @@ class NeuralConfig:
             self.logger.info(f"Disk usage for {self.data_path}: {df_output}")
         except subprocess.CalledProcessError as e:
             self.logger.warning(f"Error retrieving mount or disk usage info: {e}")
+
+        # === NEW: Dataset-specific vocabulary sizing ===
+        if self.dataset_type == "optc":
+            self.entity_vocab_size = self.optc_entity_vocab_size
+            self.action_vocab_size = self.optc_action_vocab_size
+            # Adjust sequence window size if OpTC data typically has longer sequences or needs different chunking
+            self.sequence_window_size = 100 # Example adjustment for OpTC
+            self.logger.info(f"Configured for OpTC dataset with larger vocabularies and sequence window size: {self.sequence_window_size}")
+        else: # Default to CICIDS2017 settings (already defined as default values in dataclass)
+            self.logger.info(f"Configured for CICIDS2017 dataset.")
